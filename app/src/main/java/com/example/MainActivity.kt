@@ -6,11 +6,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -20,7 +22,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.example.model.DashboardState
+import com.example.model.PendingExecution
+import com.example.model.StrategyData
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.*
+import com.example.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,11 +42,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
+                val navController = rememberNavController()
+                val viewModel: MainViewModel = viewModel()
+                
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    bottomBar = { BottomNavigationBar() }
+                    bottomBar = { BottomNavigationBar(navController) }
                 ) { innerPadding ->
-                    DashboardScreen(modifier = Modifier.padding(innerPadding))
+                    NavHost(
+                        navController = navController,
+                        startDestination = "dashboard",
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        composable("dashboard") {
+                            DashboardScreen(viewModel = viewModel)
+                        }
+                        composable("history") {
+                            PlaceholderScreen(title = "Trade History")
+                        }
+                        composable("signals") {
+                            PlaceholderScreen(title = "AI Signals")
+                        }
+                        composable("settings") {
+                            SettingsScreen(viewModel = viewModel)
+                        }
+                    }
                 }
             }
         }
@@ -40,34 +74,73 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DashboardScreen(modifier: Modifier = Modifier) {
+fun PlaceholderScreen(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundLight),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Slate400
+        )
+    }
+}
+
+@Composable
+fun DashboardScreen(modifier: Modifier = Modifier, viewModel: MainViewModel) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(BackgroundLight)
     ) {
-        TopBar()
+        TopBar(isLive = uiState.strategyData.isLive)
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            ActiveStrategyCard()
+            ActiveStrategyCard(strategyData = uiState.strategyData)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 SignalFlowCard(modifier = Modifier.weight(1f))
-                WinRateCard(modifier = Modifier.weight(1f))
+                WinRateCard(
+                    modifier = Modifier.weight(1f),
+                    winRate = uiState.strategyData.winRate
+                )
             }
-            PendingExecutionCard(modifier = Modifier.weight(1f))
+            uiState.pendingExecution?.let { pending ->
+                PendingExecutionCard(
+                    modifier = Modifier.weight(1f),
+                    pendingExecution = pending,
+                    onOverride = { viewModel.manualOverride() }
+                )
+            } ?: Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No pending execution from AI",
+                    color = Slate400,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }
 
 @Composable
-fun TopBar() {
+fun TopBar(isLive: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -96,27 +169,31 @@ fun TopBar() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
-                .background(PrimaryLight, RoundedCornerShape(16.dp))
+                .background(if (isLive) PrimaryLight else Slate100, RoundedCornerShape(16.dp))
                 .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             Box(
                 modifier = Modifier
                     .size(8.dp)
-                    .background(SuccessGreen, CircleShape)
-                    .shadow(elevation = 8.dp, spotColor = SuccessGreen, shape = CircleShape)
+                    .background(if (isLive) SuccessGreen else Slate400, CircleShape)
+                    .shadow(
+                        elevation = if (isLive) 8.dp else 0.dp,
+                        spotColor = if (isLive) SuccessGreen else Color.Transparent,
+                        shape = CircleShape
+                    )
             )
             Text(
-                text = "LIVE",
+                text = if (isLive) "LIVE" else "OFFLINE",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = PrimaryBlue
+                color = if (isLive) PrimaryBlue else Slate500
             )
         }
     }
 }
 
 @Composable
-fun ActiveStrategyCard() {
+fun ActiveStrategyCard(strategyData: StrategyData) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -140,7 +217,7 @@ fun ActiveStrategyCard() {
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        text = "AI Momentum Scalper",
+                        text = strategyData.name,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Slate800
@@ -148,13 +225,13 @@ fun ActiveStrategyCard() {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "v0.1.3-myiq",
+                        text = strategyData.version,
                         fontSize = 10.sp,
                         color = Slate400,
                         fontWeight = FontWeight.Normal
                     )
                     Text(
-                        text = "BTC/USD",
+                        text = strategyData.pair,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF4F46E5) // Indigo-600
@@ -237,7 +314,7 @@ fun SignalFlowStep(step: String, title: String, isActive: Boolean) {
 }
 
 @Composable
-fun WinRateCard(modifier: Modifier = Modifier) {
+fun WinRateCard(modifier: Modifier = Modifier, winRate: Double) {
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -256,7 +333,7 @@ fun WinRateCard(modifier: Modifier = Modifier) {
         Column {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = "72.4",
+                    text = String.format("%.1f", winRate),
                     fontSize = 30.sp,
                     fontWeight = FontWeight.Black,
                     color = Slate800
@@ -279,7 +356,7 @@ fun WinRateCard(modifier: Modifier = Modifier) {
             ) {
                  Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.724f)
+                        .fillMaxWidth((winRate / 100.0).toFloat())
                         .fillMaxHeight()
                         .background(SuccessGreen, CircleShape)
                  )
@@ -289,7 +366,11 @@ fun WinRateCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun PendingExecutionCard(modifier: Modifier = Modifier) {
+fun PendingExecutionCard(
+    modifier: Modifier = Modifier,
+    pendingExecution: PendingExecution,
+    onOverride: () -> Unit
+) {
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -313,7 +394,7 @@ fun PendingExecutionCard(modifier: Modifier = Modifier) {
                     color = Color(0xFF93C5FD) // blue-300
                 )
                 Text(
-                    text = "WAITING",
+                    text = pendingExecution.status,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF93C5FD),
@@ -325,11 +406,19 @@ fun PendingExecutionCard(modifier: Modifier = Modifier) {
             }
             
             Column(verticalArrangement = Arrangement.Center) {
-                ExecutionRow(label = "Expected Profit", value = "+$42.80", valueColor = SuccessGreen)
+                ExecutionRow(
+                    label = "Expected Profit",
+                    value = String.format("+$%.2f", pendingExecution.expectedProfit),
+                    valueColor = SuccessGreen
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(16.dp))
-                ExecutionRow(label = "AI Confidence", value = "88%", valueColor = Color.White)
+                ExecutionRow(
+                    label = "AI Confidence",
+                    value = "${pendingExecution.aiConfidence}%",
+                    valueColor = Color.White
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(16.dp))
@@ -339,12 +428,17 @@ fun PendingExecutionCard(modifier: Modifier = Modifier) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = "Execution Gate", fontSize = 14.sp, color = Slate400)
-                    Text(text = "SECURED", fontSize = 14.sp, color = Color(0xFF60A5FA), fontWeight = FontWeight.Normal) // blue-400
+                    Text(
+                        text = pendingExecution.gateStatus,
+                        fontSize = 14.sp,
+                        color = Color(0xFF60A5FA),
+                        fontWeight = FontWeight.Normal
+                    ) // blue-400
                 }
             }
             
             Button(
-                onClick = { /* TODO */ },
+                onClick = onOverride,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -378,7 +472,10 @@ fun ExecutionRow(label: String, value: String, valueColor: Color) {
 }
 
 @Composable
-fun BottomNavigationBar() {
+fun BottomNavigationBar(navController: NavController) {
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route ?: "dashboard"
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -388,18 +485,60 @@ fun BottomNavigationBar() {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BottomNavItem(title = "Trade", isSelected = true)
-        BottomNavItem(title = "History", isSelected = false)
-        BottomNavItem(title = "Signals", isSelected = false)
-        BottomNavItem(title = "Settings", isSelected = false)
+        BottomNavItem(
+            title = "Trade",
+            isSelected = currentRoute == "dashboard",
+            onClick = {
+                navController.navigate("dashboard") {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        )
+        BottomNavItem(
+            title = "History",
+            isSelected = currentRoute == "history",
+            onClick = {
+                navController.navigate("history") {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        )
+        BottomNavItem(
+            title = "Signals",
+            isSelected = currentRoute == "signals",
+            onClick = {
+                navController.navigate("signals") {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        )
+        BottomNavItem(
+            title = "Settings",
+            isSelected = currentRoute == "settings",
+            onClick = {
+                navController.navigate("settings") {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        )
     }
 }
 
 @Composable
-fun BottomNavItem(title: String, isSelected: Boolean) {
+fun BottomNavItem(title: String, isSelected: Boolean, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(4.dp)
+        modifier = Modifier
+            .padding(4.dp)
+            .clickable(onClick = onClick)
     ) {
         if (isSelected) {
             Box(
@@ -431,3 +570,4 @@ fun BottomNavItem(title: String, isSelected: Boolean) {
         )
     }
 }
+
