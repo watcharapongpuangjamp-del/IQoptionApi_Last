@@ -1,0 +1,6 @@
+{
+  "name": "IQ AI Trader",
+  "description": "Android UI for IQ Option AI Trader built with Kotlin and Firebase",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
